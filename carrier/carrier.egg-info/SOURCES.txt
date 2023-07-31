@@ -1,0 +1,8 @@
+setup.cfg
+setup.py
+carrier.egg-info/PKG-INFO
+carrier.egg-info/SOURCES.txt
+carrier.egg-info/dependency_links.txt
+carrier.egg-info/entry_points.txt
+carrier.egg-info/top_level.txt
+package/carrier.py

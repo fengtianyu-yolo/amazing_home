@@ -3,13 +3,9 @@ import os
 import time
 import shutil
 from enum import Enum
-import multiprocessing
-import multiprocessing.managers
 import sqlite3
 import time
 from threading import Timer
-import threading
-import sched
 
 class folder_info:
     # folder_name = "" # 文件夹名字
@@ -250,6 +246,7 @@ class carrier:
 
 
     def run(self):        
+        os.system('osascript -e \'display notification "自动检查中..." with title "Carrier" \'')
         # 拿到本地的所有文件夹
         local_folders = self.load_folders(carrier.local_root_path)
         self.local_folder_dict = local_folders[0]
@@ -266,7 +263,7 @@ class carrier:
             return
         
         # 发送系统通知
-        #os.system('osascript -e \'display notification "开始备份..." with title "Carrier" \'')
+        os.system('osascript -e \'display notification "开始备份..." with title "Carrier" \'')
         
         # 开始进行数据同步  
         self.transfor_data()
@@ -281,8 +278,14 @@ class carrier:
         
 
 
+def run():
+    obj = carrier()
+    obj.run()
+
+
+
 if __name__ == '__main__':
-    carrier = carrier()
-    folder_size = carrier.run()
+    obj = carrier()
+    folder_size = obj.run()
     
 
