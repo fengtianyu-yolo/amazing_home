@@ -104,7 +104,7 @@ class SessionManager:
             total_size = item[5]
             format_state = "完成✅" if session_state == 1 else "进行中🕛"
             format_progress = "{}%".format(progress)
-            format_start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
+            format_start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time/1000))
             format_duration = "{}s".format(duration / 1000)
             format_size = format_data_size(total_size)
             log = """session_id={session_id}; 状态={state}; 进度={progress}; 开始时间={start_time}; 持续时长={duration}; 总计大小={total_size}"""\
@@ -117,14 +117,13 @@ class Carrier:
 
     def __init__(self, source, des) -> None:
         self.home_path: str = os.path.expanduser("~")
-        # self.source_path = os.path.join(self.home_path, "Library/Developer/Xcode/Templates")
-        # self.destination_path = os.path.join(self.home_path, "Desktop/temp/Template")
-        if not source.startWith("/Users"):
+        self.source_path = source
+        self.destination_path = des
+        if not source.startswith("/Users"):
             self.source_path = os.path.join(self.home_path, source)
-        if not des.startWith("/Users"):
+        if not des.startswith("/Users"):
             self.destination_path = os.path.join(self.home_path, des)
         self.db_path = os.path.join(self.home_path, ".carrier.db")
-        print(self.source_path)
 
         self.file_list = []
         self.total_size = 0
@@ -274,7 +273,7 @@ class Carrier:
         update_session_sql = """
             update session_table 
             set progress = {progress}, state = {state}, duration = {duration}
-            from (select * from session_table order_by start_time desc limit 1) as t2 where session_table.session_id = t2.id 
+            from (select * from session_table order by start_time desc limit 1) as t2 where session_table.session_id = t2.session_id 
         """.format(progress=session_progress, state=session_state, duration=session_duration, session_id=1)
         self.cursor.execute(update_session_sql)
         self.connection.commit()
@@ -311,6 +310,7 @@ def sync():
         carrier.scan()
         carrier.move()
         carrier.commit()
+    print("同步完成 ✅")
 
 
 @cli.command()
