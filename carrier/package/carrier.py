@@ -5,63 +5,16 @@ import time
 from threading import Timer
 import click
 
+"""
+session table 
+    session_id - state - progress - start_time - duration - total_size 
 
-class folder_info:
-    # folder_name = "" # 文件夹名字
-    # update_time = -1 # 文件夹更新时间
-    # folder_size = 0 # 文件夹数据大小
-    # file_count = 0 # 文件夹中文件数量
-    # folder_local_path = ""
-
-    def __init__(self, folder_name, update_time, folder_size, format_folder_size, file_count,
-                 folder_local_path) -> None:
-        self.folder_name = folder_name
-        self.update_time = update_time
-        self.folder_size = folder_size
-        self.format_folder_size = format_folder_size
-        self.file_count = file_count
-        self.folder_local_path = folder_local_path
-
-    def __str__(self) -> str:
-        return "filename=" + self.folder_name + "; update_time=" + self.update_time + "; folder_size=" + self.folder_size
-
-    def is_equal(self, folder) -> bool:
-        if not self.folder_name == folder.folder_name:
-            return False
-        if not self.folder_size == folder.folder_size:
-            return False
-        if not self.update_time == folder.update_time:
-            return False
-        return True
-
-    def __eq__(self, __value: object) -> bool:
-        if isinstance(__value, folder_info):
-            if not self.folder_name == __value.folder_name:
-                return False
-            if not self.folder_size == __value.folder_size:
-                return False
-            if not self.update_time == __value.update_time:
-                return False
-            return True
-        else:
-            return False
+log table
+    log_id - session_id - file_name - start_time -   
+"""
 
 
-class carrier_info():
-    def __init__(self) -> None:
-        self.state = 0  # 0=idle 1=working
-        self.process = 0  # 拷贝进度
-        self.start_time = 0  # 开始时间
-        self.duration = 0
-
-
-def create_folder_if_needed():
-    if not os.path.exists(carrier.destination_path):
-        print("目标路径不存在，自动创建目标文件夹；{}".format(carrier.destination_path))
-        os.makedirs(carrier.destination_path)
-
-
-def data_size_format(size) -> str:
+def format_data_size(size) -> str:
     if size > (1024 * 1024 * 1024):  # GB
         result = float(size) / 1024.0 / 1024.0 / 1024.0
         format_result = round(result, 2)
@@ -78,235 +31,347 @@ def data_size_format(size) -> str:
         return "{} B".format(size)
 
 
-def caculate_folder_size(path) -> (str, int):
-    """
-    统计文件夹的数据大小
-    Returns:
-        str: 格式化的大小
-        int: 数据大小 单位是B
-    """
-    size = 0
-    for root, dir, files in os.walk(path):
-        # 先拿到当前目录先所有文件的大小
-        folder_size = 0
-        for file in files:
-            file_path = root + "/" + file
-            if os.path.islink(file_path):
-                # print("{}是一个链接".format(file_path))
-                continue
-            file_size = os.path.getsize(file_path)
-            size += file_size
-            folder_size += file_size
-        # print("root = {}, size= {}".format(root, self.data_size_format(folder_size))) # 打印根目录下的每个文件夹的大小
-
-    return data_size_format(size=size), size
-
-
-class carrier:
-    source_path = "/Users/fengtianyu/Library/Developer/Xcode/DerivedData"
-    destination_path = "/Users/fengtianyu/Desktop/Target"
-    db_path = "/Users/fengtianyu/.carrier.db"
-
+class FolderManager:
     def __init__(self) -> None:
-
-        self.total_size = 0  # 源文件夹的大小
-        self.source_folder_dict = {}  # 源文件夹
-        self.destination_folder_dict = {}  # 目标文件夹
-        self.changed_folder_list = []  # 所有有改变的文件夹名字
-
-        # 连接数据库
-        self.connection = sqlite3.connect(carrier.db_path)
+        self.table_name = "folder_list_table"
+        self.folder_list = []
+        self.home_path: str = os.path.expanduser("~")
+        self.db_path = os.path.join(self.home_path, ".carrier.db")
+        self.connection = sqlite3.connect(self.db_path)
         self.cursor = self.connection.cursor()
-        # id, state当前状态，process 进度，start_time 开始时间，duration 持续时长 默认-1，folder_list 本次移动的文件夹 
-        self.cursor.execute(
-            'create table if not exists history(ID integer primary key AUTOINCREMENT, STATE integer, PROCESS integer default 0, START_TIME time, DATA_SIZE integer default 0, DURATION integer default -1, FOLDERS text)')
+        self.create_table()
 
-    def load_folders(self, root_path) -> (dict, int):
-        """
-        获取路径下的所有folder对象 
-        只拿一级目录的
-        :return： dict字典：文件名 - 文件夹对象；int:源文件夹的大小
-        """
-        folder_dict = {}
-        # 读取目录下的所有文件夹信息
-        file_list = os.listdir(root_path)
-        total_size = 0
-        # 遍历当前文件夹
-        for file in file_list:
-            file_path = os.path.join(root_path, file)
-            if not os.path.isdir(file_path):
-                continue
-            # 获取文件夹信息
-            folder_info_obj = os.stat(file_path)
-            # 获取最近修改时间
-            folder_mtime = folder_info_obj.st_mtime
-            # 计算文件夹的大小
-            folder_size_info = caculate_folder_size(file_path)
-            # 生成 folder对象
-            folder = folder_info(file, folder_mtime, folder_size=folder_size_info[1],
-                                 format_folder_size=folder_size_info[0], file_count=1, folder_local_path=file_path)
-            folder_dict[file] = folder
-            total_size += folder_size_info[1]
-            # print(file_path, folder_mtime, folder_size, 1, file_path)
-        return folder_dict, total_size
+        self.load_folders()
 
-    def get_changed_list(self) -> []:
-        """
-        获取所有需要备份的文件夹列表
-        """
+    def load_folders(self):
+        query_sql = """
+            select * from {table_name}
+        """.format(table_name=self.table_name)
+        result = self.cursor.execute(query_sql)
+        for item in result:
+            id = item[0]
+            source_path = item[1]
+            des_path = item[2]
+            folder = (source_path, des_path)
+            self.folder_list.append(folder)
 
-        # 获取本地所有文件夹的名字，放到set中
-        local_keys = list(self.source_folder_dict.keys())
-        local_keys_set = set(local_keys)
-        # 获取远端的所有文件夹的名字，放到set中
-        remote_keys = list(self.destination_folder_dict.keys())
-        remote_keys_set = set(remote_keys)
-
-        # 获取本地新增的文件夹的名字 
-        new_add_folders = local_keys_set.difference(remote_keys_set)
-
-        # 本地有改动的文件夹
-        # 先拿到在两端都有的文件夹
-        intersection_folders = local_keys_set.intersection(remote_keys_set)
-        changed_folders: [str] = []  # 存放所有有修改的文件夹的名字
-        unchanged_folders: [str] = []  # 存放所有没有修改的文件夹
-        # 遍历这个集合，检查文件夹信息是否有变化 
-        for folder in iter(intersection_folders):
-            # 根据文件夹名字，获取本地的文件夹对象
-            local_folder_model = self.source_folder_dict[folder]
-            # 根据文件夹名字，获取远端的文件夹对象
-            remote_folder_model = self.destination_folder_dict[folder]
-            # 如果两个文件夹对象的数据一致，则不需要备份
-            if local_folder_model == remote_folder_model:
-                unchanged_folders.append(folder)
-            else:
-                changed_folders.append(folder)
-
-        print("新增加的文件夹列表：{}".format(",".join(list(new_add_folders))))
-        print("有修改的文件夹列表：{}".format(",".join(list(changed_folders))))
-        print("无修改的文件夹列表：{}".format(",".join(list(unchanged_folders))))
-        result_folders = changed_folders + list(new_add_folders)
-        return result_folders
-
-    def add_log(self):
-        """
-        把拷贝历史添加到数据库
-        """
-        print("日志写入到数据库 ... ")
-        current_time = int(time.time())
-        folder_names = ",".join(self.changed_folder_list)
-        data_size = 0
-        sql = "insert into history (state, process, start_time, data_size, folders) values ({state}, {process}, {start_time}, {data_size}, '{folders}');".format(
-            state=1, process=0, start_time=current_time, data_size=data_size, folders=folder_names)
-        print(sql)
-        self.cursor.execute(sql)
+    def add_folder(self, source, des):
+        insert_sql = """
+        insert into {} ('source_path', 'destination_path') values ('{}', '{}')
+        """.format(self.table_name, source, des)
+        self.cursor.execute(insert_sql)
         self.connection.commit()
 
-    def transfer_data(self):
+    def delete_folder(self, source, destination):
+        delete_sql = """
+            delete from {} where source_path = '{}' and destination_path = '{}'
+        """.format(self.table_name, source, destination)
+        self.cursor.execute(delete_sql)
+        self.connection.commit()
+
+    def create_table(self):
+        folder_list_table = """
+        create table if not exists {}(
+                id integer primary key autoincrement, 
+                source_path text,
+                destination_path text
+            )
+        """.format(self.table_name)
+        self.cursor.execute(folder_list_table)
+
+
+class SessionManager:
+    def __init__(self) -> None:
+        self.home_path: str = os.path.expanduser("~")
+        self.start_time = int(time.time() * 1000)
+        self.db_path = os.path.join(self.home_path, ".carrier.db")
+        # 连接数据库
+        self.connection = sqlite3.connect(self.db_path)
+        self.cursor = self.connection.cursor()
+
+    def history(self):
+
+        query_sql = """
+        select * from session_table
         """
-        开始备份数据
-        """
-        # 写入日志 start_time=now, state=1, process=0.1, folder_list=[], 
-        print("开始数据传输 ... ")
-        self.add_log()
-        # 开一个定时器 查询进度 
-        self.start_timer()
+        result = self.cursor.execute(query_sql)
+        for item in result:
+            session_id = item[0]
+            session_state = item[1]
+            progress = item[2]
+            start_time = item[3]
+            duration = item[4]
+            total_size = item[5]
+            format_state = "完成✅" if session_state == 1 else "进行中🕛"
+            format_progress = "{}%".format(progress)
+            format_start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time))
+            format_duration = "{}s".format(duration / 1000)
+            format_size = format_data_size(total_size)
+            log = """session_id={session_id}; 状态={state}; 进度={progress}; 开始时间={start_time}; 持续时长={duration}; 总计大小={total_size}"""\
+                .format(session_id=session_id, state=format_state, progress=format_progress,\
+                        start_time=format_start_time, duration=format_duration, total_size=format_size)
+            print(log)
 
-        # 开始拷贝 ,开一个子线程
-        for folder_name in self.changed_folder_list:
-            folder = self.source_folder_dict[folder_name]  # 拿到文件夹对象
-            remote_path = self.destination_path + "/" + folder_name
-            print("数据同步：{} to {}".format(folder.folder_local_path, remote_path))
-            shutil.copytree(src=folder.folder_local_path, dst=remote_path, symlinks=True, dirs_exist_ok=True)
 
-    def check_process(self):
-        """
-        检查拷贝进度
-        """
-        # 查询目标文件夹大小
-        folder_info = caculate_folder_size(self.destination_path)
-        size = folder_info[1]
-        precent = int(size / self.total_size * 100)
-        format_size = data_size_format(size)
-        print("当前拷贝进度 {}% 目标文件夹大小={}".format(precent, format_size))
-        if self.stop_timer == False and precent < 100:
-            tiemr = Timer(3, self.check_process)
-            tiemr.start()
+class Carrier:
 
-    def start_timer(self):
-        """
-        计时器启动
-        """
-        print("计时器启动")
-        self.stop_timer = False
-        t = Timer(0, self.check_process)
-        t.start()
+    def __init__(self, source, des) -> None:
+        self.home_path: str = os.path.expanduser("~")
+        # self.source_path = os.path.join(self.home_path, "Library/Developer/Xcode/Templates")
+        # self.destination_path = os.path.join(self.home_path, "Desktop/temp/Template")
+        if not source.startWith("/Users"):
+            self.source_path = os.path.join(self.home_path, source)
+        if not des.startWith("/Users"):
+            self.destination_path = os.path.join(self.home_path, des)
+        self.db_path = os.path.join(self.home_path, ".carrier.db")
+        print(self.source_path)
 
-    def run(self):
-        os.system('osascript -e \'display notification "自动检查中..." with title "Carrier" \'')
+        self.file_list = []
+        self.total_size = 0
+        self.finish_size = 0
 
-        # 加载源文件夹数据
-        print("加载源地址的所有文件夹, {} ... ".format(carrier.source_path))
-        local_folders = self.load_folders(carrier.source_path)
-        self.source_folder_dict = local_folders[0]
-        self.total_size = int(local_folders[1])
-        format_total_size = data_size_format(self.total_size)
-        print("源文件夹加载完成，文件夹大小 = {}".format(format_total_size))
+        self.start_time = int(time.time() * 1000)
 
-        # 目标文件夹是否存在
-        create_folder_if_needed()
+        # 连接数据库
+        self.connection = sqlite3.connect(self.db_path)
+        self.cursor = self.connection.cursor()
+        self.create_table()
 
-        # 拿到远端的所有文件夹
-        print("获取目标地址的所有文件夹 ... ")
-        destination_folders = self.load_folders(carrier.destination_path)
-        self.destination_folder_dict = destination_folders[0]
-        print("目标位置信息加载完成")
+        if not os.path.exists(self.destination_path):
+            os.makedirs(self.destination_path)
 
-        # 拿到所有需要同步的文件夹的名字
-        self.changed_folder_list = self.get_changed_list()
-        # 如果对比没有差异，本次不需要同步。记录日志。
-        if len(self.changed_folder_list) == 0:
-            # 写入日志表 
-            print("没有需要备份的文件")
+    def scan(self, sub_path=""):
+
+        current_root_path = os.path.join(self.source_path, sub_path)
+
+        # 遍历当前路径下所有文件夹
+        for item in os.listdir(current_root_path):
+
+            # 拿到文件路径
+            current_file = os.path.join(current_root_path, item)
+
+            # 如果是一个文件夹
+            if os.path.isdir(current_file):
+                # 目标位置文件夹路径
+                target_path = os.path.join(self.destination_path, sub_path, item)
+
+                # 目标位置不存在该文件夹，创建文件夹
+                if not os.path.exists(target_path):
+                    os.mkdir(target_path)
+
+                # 拼接相对路径  如 Template/iOS
+                full_sub_path = os.path.join(sub_path, item)
+                self.scan(full_sub_path)
+
+            # 如果源文件是一个文件
+            elif os.path.isfile(current_file):
+
+                # 构造目标文件路径
+                target_file = os.path.join(self.destination_path, sub_path, item)
+                # print("源文件={}, 目标文件={}".format(current_file, target_file))
+
+                # 如果目标文件不存在：将该源文件路径和目标文件路径添加到容器
+                if not os.path.exists(target_file):
+                    item = (current_file, target_file, "new")
+                    self.file_list.append(item)
+                    # 统计总共的文件大小
+                    source_file_stat = os.stat(current_file)
+                    self.total_size += source_file_stat.st_size
+                else:
+                    # 如果文件存在，拿到源文件和目标文件的元数据
+                    source_file_stat = os.stat(current_file)
+                    target_file_stat = os.stat(target_file)
+
+                    if source_file_stat.st_size != target_file_stat.st_size:
+                        file_tuple = (current_file, target_file, "update")
+                        self.file_list.append(file_tuple)
+                        self.total_size += source_file_stat.st_size
+                    elif source_file_stat.st_mtime != target_file_stat.st_mtime:
+                        file_tuple = (current_file, target_file, "update")
+                        self.file_list.append(file_tuple)
+                        self.total_size += source_file_stat.st_size
+            else:
+                print("未知数据 {}".format(current_file))
+
+    def move(self):
+
+        if len(self.file_list) == 0:
+            self.insert_session(1, 100)
             return
+
+        # 写入日志
+        self.insert_session(0, 0)
+
+        for item in self.file_list:
+            source = item[0]
+            des = item[1]
+            shutil.copy2(source, des)
+            file_info = os.stat(des)
+            self.finish_size += file_info.st_size
+
+            # 更新数据库的进度
+            progress = int(self.finish_size / self.total_size * 100)
+            self.update_session(progress)
+
+    def start_progress_observer(self):
+        # 没有要拷贝的文件，不需要启动计时器
+        if len(self.file_list) == 0:
+            return
+
+        if self.total_size <= 0:
+            tiemr = Timer(1, self.start_progress_observer)
+            tiemr.start()
         else:
-            print("所有需要同步的文件：{}".format(self.changed_folder_list))
+            progress = self.finish_size / self.total_size
+            if progress >= 1.0:
+                return
+            else:
+                tiemr = Timer(1, self.start_progress_observer)
+                tiemr.start()
 
-        # 发送系统通知
-        os.system('osascript -e \'display notification "开始备份..." with title "Carrier" \'')
-
-        # 开始进行数据同步  
-        self.transfer_data()
-
-    def clean(self):
+    def create_table(self):
+        create_session_table = """
+        create table if not exists session_table(
+            session_id integer primary key autoincrement,
+            state integer,
+            progress integer default 0,
+            start_time integer,
+            duration integer,
+            total_size integer default 0
+        )
         """
-        清理已经备份完成的文件夹
+        self.cursor.execute(create_session_table)
+        create_info_table = """
+            create table if not exists info_table(
+                id integer primary key autoincrement, 
+                file_name text,
+                start_time time,
+                session_id integer 
+            )
         """
+        self.cursor.execute(create_info_table)
+
+    def insert_session(self, session_state, session_progress):
+
+        session_log = """
+            insert into session_table ('state', 'progress', 'start_time', 'duration', 'total_size') values(
+                {state},
+                {progress},
+                {start_time},
+                0,
+                {total_size}
+            )
+        """.format(state=session_state, progress= session_progress, start_time=self.start_time, total_size=self.total_size)
+        self.cursor.execute(session_log)
+        self.connection.commit()
+        pass
+
+    def update_session(self, session_progress):
+        session_state = 1 if session_progress >= 100 else 0
+        current_time = int(time.time() * 1000)
+        session_duration = current_time - self.start_time
+
+        update_session_sql = """
+            update session_table 
+            set progress = {progress}, state = {state}, duration = {duration}
+            from (select * from session_table order_by start_time desc limit 1) as t2 where session_table.session_id = t2.id 
+        """.format(progress=session_progress, state=session_state, duration=session_duration, session_id=1)
+        self.cursor.execute(update_session_sql)
+        self.connection.commit()
+
+    def commit(self):
+        """ 自动提交到 github """
+        # 读取目标文件夹的git仓库
         pass
 
 
-@click.command()
-@click.argument('src', type=click.Path())
-@click.argument('des', type=click.Path())
-def run(src, des):
-    obj = carrier()
-    carrier.source_path = src
-    carrier.destination_path = des
-    obj.run()
-    print("源位置是：{}".format(src))
-    print("目标位置是：{}".format(des))
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
+    if ctx.invoked_subcommand is None:
+        print("cli execute")
+    else:
+        pass
 
 
-@click.command
-def progress():
+@cli.command()
+def sync():
+    """
+    同步所有已经记录的文件夹
+    """
+    manager = FolderManager()
+    if len(manager.folder_list) == 0:
+        print("没有需要同步的文件夹")
+        return
+
+    for item in manager.folder_list:
+        source = item[0]
+        des = item[1]
+        carrier = Carrier(source, des)
+        carrier.scan()
+        carrier.move()
+        carrier.commit()
+
+
+@cli.command()
+@click.argument('source')
+@click.argument('destination')
+def add(source, destination):
+    """子命令：添加需要同步的文件夹。将输入的文件夹添加到数据 """
+    manager = FolderManager()
+    manager.add_folder(source, destination)
+
+
+@cli.command()
+@click.argument('source')
+@click.argument('destination')
+def delete(source, destination):
+    """ 子命令：删除已经完成的源文件夹 """
+    manager = FolderManager()
+    manager.delete_folder(source, destination)
+
+
+@cli.command()
+def show():
+    manager = FolderManager()
+    for item in manager.folder_list:
+        print('source = {}, des = {}'.format(item[0], item[1]))
+
+
+@cli.command()
+def history():
+    manager = SessionManager()
+    manager.history()
+
+
+@cli.command()
+def state():
     pass
 
 
-@click.command
-@click.argument('user-name')
-def hello(user_name):
-    print('hello {}'.format(user_name))
+def test_folder_manager():
+    manager = FolderManager()
+    selection = input("1：删除目录\n2：新增目录\n3:查询现在的所有目录\n0：退出 \n")
+    if selection == "1":
+        source = input("输入需要删除的源目录:")
+        des = input("输入需要删除的目标目录:")
+        manager.delete_folder(source, des)
+    elif selection == '2':
+        source = input("输入需要新增的源目录:")
+        des = input("输入需要新增的目标目录:")
+        manager.add_folder(source, des)
+    elif selection == '3':
+        for item in manager.folder_list:
+            print('source = {}, des = {}'.format(item[0], item[1]))
+    else:
+        exit(0)
 
 
 if __name__ == '__main__':
-    run()
+    # sync_folder()
+    # test_folder_manager()
+    # cli()
+    history()
+
+
+

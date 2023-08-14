@@ -1,2 +1,2 @@
 [console_scripts]
-carrier = package.carrier:run
+carrier = package.carrier:cli
