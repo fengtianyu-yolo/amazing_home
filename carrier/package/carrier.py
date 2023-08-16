@@ -4,6 +4,7 @@ import sqlite3
 import time
 from threading import Timer
 import click
+import git
 
 """
 session table 
@@ -281,7 +282,19 @@ class Carrier:
     def commit(self):
         """ 自动提交到 github """
         # 读取目标文件夹的git仓库
-        pass
+        try:
+            local_repo = git.Repo(self.destination_path)
+        except git.exc.InvalidGitRepositoryError:
+            print("目标文件夹不是git 仓库")
+            return
+
+        if not local_repo.is_dirty():
+            return
+
+        local_repo.git.add('.')
+        local_repo.git.commit(m='files update')
+        repo_remote = local_repo.remote()
+        repo_remote.push()
 
 
 @click.group(invoke_without_command=True)
@@ -294,7 +307,8 @@ def cli(ctx):
 
 
 @cli.command()
-def sync():
+@click.option('--auto-commit', 'auto_commit', type=bool, default=True)
+def sync(auto_commit):
     """
     同步所有已经记录的文件夹
     """
@@ -309,7 +323,8 @@ def sync():
         carrier = Carrier(source, des)
         carrier.scan()
         carrier.move()
-        carrier.commit()
+        if auto_commit:
+            carrier.commit()
     print("同步完成 ✅")
 
 
@@ -370,8 +385,7 @@ def test_folder_manager():
 if __name__ == '__main__':
     # sync_folder()
     # test_folder_manager()
-    # cli()
-    history()
+    cli()
 
 
 
