@@ -103,14 +103,71 @@ class SessionManager:
             start_time = item[3]
             duration = item[4]
             total_size = item[5]
+            source_path = item[6]
+            des_path = item[7]
             format_state = "完成✅" if session_state == 1 else "进行中🕛"
             format_progress = "{}%".format(progress)
             format_start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time/1000))
             format_duration = "{}s".format(duration / 1000)
             format_size = format_data_size(total_size)
-            log = """session_id={session_id}; 状态={state}; 进度={progress}; 开始时间={start_time}; 持续时长={duration}; 总计大小={total_size}"""\
-                .format(session_id=session_id, state=format_state, progress=format_progress,\
-                        start_time=format_start_time, duration=format_duration, total_size=format_size)
+            log = """session_id={session_id}; 目录={des}; 状态={state}; 进度={progress}; 开始时间={start_time}; 持续时长={duration}; 总计大小={total_size}"""\
+                .format(session_id=session_id, des=des_path, state=format_state, progress=format_progress,
+                        start_time=format_start_time, duration=format_duration,
+                        total_size=format_size)
+            print(log)
+
+
+class LogManager:
+    def __init__(self):
+        self.table_name = "info_table"
+        self.home_path: str = os.path.expanduser("~")
+        self.db_path = os.path.join(self.home_path, ".carrier.db")
+        # 连接数据库
+        self.connection = sqlite3.connect(self.db_path)
+        self.cursor = self.connection.cursor()
+        self.create()
+
+    def create(self):
+        create_info_table = """
+            create table if not exists {table_name} (
+                id integer primary key autoincrement, 
+                file_name text,
+                reason text,
+                type text                 
+            )
+        """.format(table_name=self.table_name)
+        self.cursor.execute(create_info_table)
+
+    def insert(self, file_name, reason, type):
+        sql = """
+            insert into {table_name} ('file_name', 'reason', 'type') values (
+                '{file}',
+                '{reason}',
+                '{type}'
+            )
+        """.format(table_name=self.table_name,
+                   file=file_name,
+                   reason=reason,
+                   type=type
+                   )
+
+    def history(self):
+        query_sql = """
+           select * from {table_name}
+           """.format(table_name=self.table_name)
+
+        result = self.cursor.execute(query_sql)
+        for item in result:
+            log_id = item[0]
+            file = item[1]
+            reason = item[2]
+            type = item[3]
+            log = """log_id={log_id}; 文件={file}; 原因={reason}; 类型={type}""" .format(
+                log_id=log_id,
+                file=file,
+                reason=reason,
+                type=type
+            )
             print(log)
 
 
@@ -129,6 +186,7 @@ class Carrier:
         self.file_list = []
         self.total_size = 0
         self.finish_size = 0
+        self.log_mgr = LogManager()
 
         self.start_time = int(time.time() * 1000)
 
@@ -172,7 +230,7 @@ class Carrier:
 
                 # 如果目标文件不存在：将该源文件路径和目标文件路径添加到容器
                 if not os.path.exists(target_file):
-                    item = (current_file, target_file, "new")
+                    item = (current_file, target_file, "new", "")
                     self.file_list.append(item)
                     # 统计总共的文件大小
                     source_file_stat = os.stat(current_file)
@@ -183,11 +241,11 @@ class Carrier:
                     target_file_stat = os.stat(target_file)
 
                     if source_file_stat.st_size != target_file_stat.st_size:
-                        file_tuple = (current_file, target_file, "update")
+                        file_tuple = (current_file, target_file, "update", "size")
                         self.file_list.append(file_tuple)
                         self.total_size += source_file_stat.st_size
                     elif source_file_stat.st_mtime != target_file_stat.st_mtime:
-                        file_tuple = (current_file, target_file, "update")
+                        file_tuple = (current_file, target_file, "update", "update_time")
                         self.file_list.append(file_tuple)
                         self.total_size += source_file_stat.st_size
             else:
@@ -197,6 +255,7 @@ class Carrier:
 
         if len(self.file_list) == 0:
             self.insert_session(1, 100)
+            print("没有更新")
             return
 
         # 写入日志
@@ -205,10 +264,13 @@ class Carrier:
         for item in self.file_list:
             source = item[0]
             des = item[1]
+            type = item[2]
+            reason = item[3]
             shutil.copy2(source, des)
             file_info = os.stat(des)
             self.finish_size += file_info.st_size
 
+            self.log_mgr.insert(des, reason, type)
             # 更新数据库的进度
             progress = int(self.finish_size / self.total_size * 100)
             self.update_session(progress)
@@ -237,31 +299,31 @@ class Carrier:
             progress integer default 0,
             start_time integer,
             duration integer,
-            total_size integer default 0
+            total_size integer default 0,
+            source text,
+            destination text
         )
         """
         self.cursor.execute(create_session_table)
-        create_info_table = """
-            create table if not exists info_table(
-                id integer primary key autoincrement, 
-                file_name text,
-                start_time time,
-                session_id integer 
-            )
-        """
-        self.cursor.execute(create_info_table)
 
     def insert_session(self, session_state, session_progress):
 
         session_log = """
-            insert into session_table ('state', 'progress', 'start_time', 'duration', 'total_size') values(
+            insert into session_table ('state', 'progress', 'start_time', 'duration', 'total_size', 'source', 'destination') values(
                 {state},
                 {progress},
                 {start_time},
                 0,
-                {total_size}
+                {total_size},
+                '{source}',
+                '{destination}'
             )
-        """.format(state=session_state, progress= session_progress, start_time=self.start_time, total_size=self.total_size)
+        """.format(state=session_state,
+                   progress=session_progress,
+                   start_time=self.start_time,
+                   total_size=self.total_size,
+                   source=self.source_path,
+                   destination=self.destination_path)
         self.cursor.execute(session_log)
         self.connection.commit()
         pass
@@ -360,6 +422,12 @@ def history():
 
 
 @cli.command()
+def log():
+    mgr = LogManager()
+    mgr.history()
+
+
+@cli.command()
 def state():
     pass
 
@@ -385,7 +453,10 @@ def test_folder_manager():
 if __name__ == '__main__':
     # sync_folder()
     # test_folder_manager()
-    cli()
+    # cli()
+    sync()
+    history()
+    log()
 
 
 
